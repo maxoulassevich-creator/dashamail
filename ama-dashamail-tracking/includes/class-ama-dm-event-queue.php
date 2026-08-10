@@ -17,6 +17,50 @@ final class AMA_DM_Event_Queue {
 		);
 	}
 
+	/**
+	 * Превращает пакет, собранный AMA_DM_Events, в готовые события очереди.
+	 *
+	 * @param array  $batch  Массив вида array( array( 'command' => …, 'payload' => … ), … ).
+	 * @param string $source Источник для журнала.
+	 */
+	public static function make_batch( $batch, $source = '' ) {
+		$events = array();
+
+		foreach ( (array) $batch as $item ) {
+			if ( ! is_array( $item ) || empty( $item['command'] ) ) {
+				continue;
+			}
+			$events[] = self::make( $item['command'], isset( $item['payload'] ) ? $item['payload'] : array(), $source );
+		}
+
+		return $events;
+	}
+
+	/** Ставит в очередь пакет событий текущего посетителя. */
+	public static function push_batch( $batch, $source = '' ) {
+		$events = array();
+
+		foreach ( (array) $batch as $item ) {
+			if ( ! is_array( $item ) || empty( $item['command'] ) ) {
+				continue;
+			}
+			$events[] = self::push( $item['command'], isset( $item['payload'] ) ? $item['payload'] : array(), $source );
+		}
+
+		return $events;
+	}
+
+	/** Ставит в очередь пакет событий конкретного пользователя. */
+	public static function push_batch_for_user( $user_id, $batch, $source = '' ) {
+		$events = array();
+
+		foreach ( self::make_batch( $batch, $source ) as $event ) {
+			$events[] = self::push_for_user( $user_id, $event );
+		}
+
+		return $events;
+	}
+
 	public static function push( $command, $payload = array(), $source = '' ) {
 		$event = self::make( $command, $payload, $source );
 
@@ -90,6 +134,31 @@ final class AMA_DM_Event_Queue {
 		$log   = is_array( $log ) ? $log : array();
 		$log[] = $event;
 		update_option( self::LOG_OPTION, array_slice( $log, -100 ), false );
+	}
+
+	/**
+	 * Фиксирует событие, которое не было отправлено.
+	 *
+	 * Пустой productId — главная причина строк без данных в журнале DashaMail,
+	 * поэтому такие случаи попадают в лог отдельной записью с причиной.
+	 *
+	 * @param string $reason  Причина пропуска.
+	 * @param array  $context Что именно пытались отправить.
+	 */
+	public static function log_skipped( $reason, $context = array() ) {
+		if ( ! AMA_DM_Settings::yes( 'debug_log' ) ) {
+			return;
+		}
+
+		self::log(
+			array(
+				'id'      => wp_generate_uuid4(),
+				'command' => 'skipped',
+				'payload' => array_merge( array( 'reason' => (string) $reason ), (array) $context ),
+				'source'  => 'skipped',
+				'time'    => time(),
+			)
+		);
 	}
 
 	public static function get_log() {
